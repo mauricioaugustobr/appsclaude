@@ -26,7 +26,7 @@ interface PreviewPanelProps {
   activeTool?: string;
 }
 
-export default function PreviewPanel({ canvasRef }: PreviewPanelProps) {
+export default function PreviewPanel({ canvasRef, activeTool }: PreviewPanelProps) {
   const { state, dispatch } = useEditor();
   const videoEls = useRef<Map<string, HTMLVideoElement>>(new Map());
   const audioEls = useRef<Map<string, HTMLAudioElement>>(new Map());
@@ -238,6 +238,41 @@ export default function PreviewPanel({ canvasRef }: PreviewPanelProps) {
     dispatch({ type: 'SET_PLAYING', payload: !state.isPlaying });
   };
 
+  const handleCanvasClick = () => {
+    if (activeTool === 'split' && state.selectedClipId) {
+      dispatch({
+        type: 'SPLIT_CLIP',
+        payload: { clipId: state.selectedClipId, splitTime: state.currentTime },
+      });
+    } else if (activeTool === 'text') {
+      const clip = {
+        id: crypto.randomUUID(),
+        mediaId: null,
+        type: 'text' as const,
+        name: 'Texto',
+        track: 3,
+        startTime: state.currentTime,
+        duration: 5,
+        trimStart: 0,
+        text: 'Texto aqui',
+        fontSize: 64,
+        fontFamily: 'Arial',
+        color: '#ffffff',
+        bgColor: 'transparent',
+        posX: 0.5,
+        posY: 0.8,
+        bold: false,
+        italic: false,
+        align: 'center' as const,
+      };
+      dispatch({ type: 'ADD_CLIP', payload: clip });
+      dispatch({ type: 'SELECT_CLIP', payload: clip.id });
+    }
+  };
+
+  const canvasCursor =
+    activeTool === 'split' ? 'crosshair' : activeTool === 'text' ? 'text' : 'default';
+
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const t = parseFloat(e.target.value);
     dispatch({ type: 'SET_TIME', payload: t });
@@ -277,8 +312,19 @@ export default function PreviewPanel({ canvasRef }: PreviewPanelProps) {
           width={CANVAS_W}
           height={CANVAS_H}
           className="w-full h-full"
-          style={{ display: 'block' }}
+          style={{ display: 'block', cursor: canvasCursor }}
+          onClick={handleCanvasClick}
         />
+        {activeTool === 'split' && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-yellow-300 bg-black/60 px-2 py-1 rounded pointer-events-none">
+            Clique para dividir o clipe selecionado
+          </div>
+        )}
+        {activeTool === 'text' && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-blue-300 bg-black/60 px-2 py-1 rounded pointer-events-none">
+            Clique para adicionar texto
+          </div>
+        )}
       </div>
 
       {/* Controls */}
