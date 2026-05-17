@@ -3,21 +3,32 @@
 @tailwind utilities;
 
 @layer base {
+  * {
+    box-sizing: border-box;
+  }
+  html, body, #root {
+    height: 100%;
+    overflow: hidden;
+  }
   body {
-    @apply bg-gray-950 text-gray-100 antialiased;
-  }
-}
-
-@layer components {
-  .card {
-    @apply bg-gray-900 rounded-xl border border-gray-800 p-4;
+    background: #111;
+    color: #e5e7eb;
+    -webkit-font-smoothing: antialiased;
   }
 
-  .btn-primary {
-    @apply bg-green-600 hover:bg-green-500 text-white font-semibold px-4 py-2 rounded-lg transition-colors;
+  /* Dark scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
   }
-
-  .btn-ghost {
-    @apply hover:bg-gray-800 text-gray-300 px-3 py-2 rounded-lg transition-colors;
+  ::-webkit-scrollbar-track {
+    background: #1a1a1a;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #3a3a3a;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #555;
   }
 }
