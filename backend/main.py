@@ -15,11 +15,14 @@ import threading
 import time
 import uuid
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
+import auth
 import converter
+from auth import require_auth
 from converter import ConvertOptions
 from jobs import JobManager
 
@@ -72,11 +75,30 @@ def health():
         "status": "ok",
         "ffmpeg_available": converter.ffmpeg_available(),
         "ffmpeg_version": converter.ffmpeg_version(),
+        "auth_default_credentials": auth.using_default_credentials(),
     }
 
 
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/api/login")
+def login(payload: LoginRequest):
+    token = auth.authenticate(payload.email, payload.password)
+    if not token:
+        raise HTTPException(status_code=401, detail="Email ou senha inválidos.")
+    return {"token": token, "email": payload.email.strip().lower()}
+
+
+@app.get("/api/me")
+def me(email: str = Depends(require_auth)):
+    return {"email": email}
+
+
 @app.get("/api/formats")
-def formats():
+def formats(_: str = Depends(require_auth)):
     """Formatos, codecs, níveis e resoluções suportados (para a UI)."""
     return {
         "input_extensions": converter.INPUT_EXTENSIONS,
@@ -148,6 +170,7 @@ async def convert(
     two_pass: bool = Form(False),
     trim_start: float = Form(0),
     trim_end: float = Form(0),
+    _: str = Depends(require_auth),
 ):
     if not converter.ffmpeg_available():
         raise HTTPException(
@@ -183,7 +206,7 @@ async def convert(
 
 
 @app.get("/api/jobs/{job_id}")
-def job_status(job_id: str):
+def job_status(job_id: str, _: str = Depends(require_auth)):
     job = manager.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job não encontrado.")
@@ -191,7 +214,7 @@ def job_status(job_id: str):
 
 
 @app.post("/api/jobs/{job_id}/cancel")
-def cancel_job(job_id: str):
+def cancel_job(job_id: str, _: str = Depends(require_auth)):
     ok = manager.cancel(job_id)
     if not ok:
         raise HTTPException(status_code=400, detail="Não foi possível cancelar o job.")
@@ -199,7 +222,11 @@ def cancel_job(job_id: str):
 
 
 @app.get("/api/download/{job_id}")
-def download(job_id: str):
+def download(job_id: str, token: str = ""):
+    # O download é aberto via link direto (<a href>), então o token vem na
+    # query string em vez do cabeçalho Authorization.
+    if not auth.verify_token(token):
+        raise HTTPException(status_code=401, detail="Sessão inválida ou expirada.")
     job = manager.get(job_id)
     if not job or job.status != "done" or not job.output_path:
         raise HTTPException(status_code=404, detail="Resultado indisponível.")

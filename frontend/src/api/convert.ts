@@ -1,16 +1,56 @@
 import axios from 'axios'
 import type { ConvertSettings, FormatsResponse, JobResult } from '../types/convert'
+import { clearSession, getToken, setSession } from './auth'
 
 const api = axios.create({ baseURL: '/api' })
+
+// Anexa o token de sessão em toda requisição
+api.interceptors.request.use((config) => {
+  const token = getToken()
+  if (token) {
+    config.headers = config.headers ?? {}
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+// Callback disparado quando a sessão expira (401)
+let onUnauthorized: (() => void) | null = null
+export function setUnauthorizedHandler(fn: () => void): void {
+  onUnauthorized = fn
+}
+
+api.interceptors.response.use(
+  (res) => res,
+  (error) => {
+    if (error?.response?.status === 401) {
+      clearSession()
+      if (onUnauthorized) onUnauthorized()
+    }
+    return Promise.reject(error)
+  },
+)
 
 export interface HealthResponse {
   status: string
   ffmpeg_available: boolean
   ffmpeg_version: string | null
+  auth_default_credentials?: boolean
 }
 
 export async function getHealth(): Promise<HealthResponse> {
   const { data } = await api.get<HealthResponse>('/health')
+  return data
+}
+
+export interface LoginResponse {
+  token: string
+  email: string
+}
+
+export async function login(email: string, password: string): Promise<LoginResponse> {
+  const { data } = await api.post<LoginResponse>('/login', { email, password })
+  setSession(data.token, data.email)
   return data
 }
 
@@ -64,5 +104,6 @@ export async function cancelJob(jobId: string): Promise<void> {
 }
 
 export function downloadUrl(jobId: string): string {
-  return `/api/download/${jobId}`
+  const token = getToken()
+  return `/api/download/${jobId}?token=${encodeURIComponent(token ?? '')}`
 }

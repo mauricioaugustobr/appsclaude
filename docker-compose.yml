@@ -5,6 +5,11 @@ services:
       - WORK_DIR=/data
       - FILE_TTL=3600        # arquivos temporários expiram após 1h
       - MAX_UPLOAD_MB=0      # 0 = sem limite de upload
+      # Login: "email:senha" separados por vírgula. Troque em produção!
+      - AUTH_USERS=admin@empresa.com:admin123
+      # Defina um segredo fixo para os tokens sobreviverem a reinícios:
+      # - SECRET_KEY=troque-por-um-segredo-longo-e-aleatorio
+      - TOKEN_TTL=43200      # validade da sessão em segundos (12h)
     volumes:
       - video_data:/data
     restart: unless-stopped

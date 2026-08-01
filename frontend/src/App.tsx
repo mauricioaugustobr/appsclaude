@@ -4,12 +4,15 @@ import Header from './components/Header'
 import Dropzone from './components/Dropzone'
 import SettingsPanel from './components/SettingsPanel'
 import FileCard from './components/FileCard'
+import Login from './components/Login'
 import {
   getFormats,
   getHealth,
   getJob,
+  setUnauthorizedHandler,
   submitConversion,
 } from './api/convert'
+import { clearSession, getEmail, getToken } from './api/auth'
 import type {
   ConvertSettings,
   FormatsResponse,
@@ -44,22 +47,40 @@ export default function App() {
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
 
+  const [authed, setAuthed] = useState<boolean>(() => !!getToken())
+  const [email, setEmail] = useState<string | null>(() => getEmail())
+  const [defaultCreds, setDefaultCreds] = useState<boolean>(false)
+
   const pollers = useRef<Record<string, ReturnType<typeof setInterval>>>({})
 
-  // Carrega formatos e status do FFmpeg
+  // Se a sessão expirar (401), volta para a tela de login
   useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setAuthed(false)
+      setEmail(null)
+    })
+  }, [])
+
+  // Status do FFmpeg / credenciais padrão (público, não exige login)
+  useEffect(() => {
+    getHealth()
+      .then((h) => {
+        setFfmpegAvailable(h.ffmpeg_available)
+        setFfmpegVersion(h.ffmpeg_version)
+        setDefaultCreds(!!h.auth_default_credentials)
+      })
+      .catch(() => setFfmpegAvailable(null))
+  }, [])
+
+  // Carrega os formatos apenas quando autenticado
+  useEffect(() => {
+    if (!authed) return
     getFormats()
       .then(setFormats)
       .catch(() =>
         setLoadError('Não foi possível carregar as configurações do servidor.'),
       )
-    getHealth()
-      .then((h) => {
-        setFfmpegAvailable(h.ffmpeg_available)
-        setFfmpegVersion(h.ffmpeg_version)
-      })
-      .catch(() => setFfmpegAvailable(null))
-  }, [])
+  }, [authed])
 
   useEffect(() => {
     const active = pollers.current
@@ -150,6 +171,16 @@ export default function App() {
     )
   }, [])
 
+  const handleLogout = useCallback(() => {
+    Object.values(pollers.current).forEach(clearInterval)
+    pollers.current = {}
+    clearSession()
+    setQueue([])
+    setFormats(null)
+    setEmail(null)
+    setAuthed(false)
+  }, [])
+
   const pendingCount = queue.filter(
     (it) => it.status === 'queued' && !it.jobId,
   ).length
@@ -157,10 +188,28 @@ export default function App() {
     ['done', 'error', 'canceled'].includes(it.status),
   )
 
+  // Tela de login
+  if (!authed) {
+    return (
+      <Login
+        defaultCredentials={defaultCreds}
+        onSuccess={() => {
+          setAuthed(true)
+          setEmail(getEmail())
+        }}
+      />
+    )
+  }
+
   return (
     <div className="min-h-screen">
       <div className="mx-auto max-w-6xl px-4 py-8 md:py-12">
-        <Header ffmpegAvailable={ffmpegAvailable} ffmpegVersion={ffmpegVersion} />
+        <Header
+          ffmpegAvailable={ffmpegAvailable}
+          ffmpegVersion={ffmpegVersion}
+          email={email}
+          onLogout={handleLogout}
+        />
 
         {loadError && (
           <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-300">

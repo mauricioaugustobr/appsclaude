@@ -23,6 +23,7 @@ serviços de terceiros.
   remover áudio, velocidade de encode, codificação em **duas passagens**
 - **Acompanhamento de progresso** em tempo real e download direto do resultado
 - Mostra **quanto de espaço foi economizado** em cada arquivo
+- **Login simples** por email e senha, para uso interno da empresa
 
 ## 🧱 Arquitetura
 
@@ -89,24 +90,50 @@ npm run dev
 Acesse **http://localhost:3000** (o Vite já faz proxy de `/api` para o
 backend na porta 8000).
 
+## 🔐 Login (autenticação)
+
+O acesso é protegido por email e senha. Os usuários são definidos pela
+variável de ambiente `AUTH_USERS`, no formato `email:senha` separados por
+vírgula:
+
+```bash
+AUTH_USERS="joao@empresa.com:senhaForte,maria@empresa.com:outraSenha"
+```
+
+- Se `AUTH_USERS` não for definida, um usuário padrão é criado para o primeiro
+  acesso: **admin@empresa.com** / **admin123** (a interface avisa e pede para
+  trocar).
+- As senhas nunca são armazenadas em texto puro — apenas o hash (PBKDF2) fica
+  em memória.
+- O login devolve um token assinado (HMAC) que expira conforme `TOKEN_TTL`.
+- Defina um `SECRET_KEY` fixo em produção para que as sessões continuem válidas
+  após reiniciar o servidor.
+
 ## ⚙️ Configuração (variáveis de ambiente do backend)
 
-| Variável        | Padrão  | Descrição                                         |
-|-----------------|---------|---------------------------------------------------|
-| `WORK_DIR`      | tempdir | Diretório dos arquivos temporários                |
-| `FILE_TTL`      | `3600`  | Segundos até os arquivos temporários expirarem    |
-| `MAX_UPLOAD_MB` | `0`     | Limite de upload em MB (`0` = sem limite)         |
+| Variável        | Padrão      | Descrição                                              |
+|-----------------|-------------|--------------------------------------------------------|
+| `WORK_DIR`      | tempdir     | Diretório dos arquivos temporários                     |
+| `FILE_TTL`      | `3600`      | Segundos até os arquivos temporários expirarem         |
+| `MAX_UPLOAD_MB` | `0`         | Limite de upload em MB (`0` = sem limite)              |
+| `AUTH_USERS`    | *(padrão)*  | Usuários no formato `email:senha,email2:senha2`        |
+| `SECRET_KEY`    | aleatório   | Segredo para assinar os tokens (defina em produção)    |
+| `TOKEN_TTL`     | `43200`     | Validade da sessão em segundos (padrão 12h)            |
 
 ## 🔌 API
 
-| Método | Rota                      | Descrição                              |
-|--------|---------------------------|----------------------------------------|
-| GET    | `/api/health`             | Status e disponibilidade do FFmpeg     |
-| GET    | `/api/formats`            | Formatos, codecs e opções suportados   |
-| POST   | `/api/convert`            | Envia um vídeo e inicia a conversão    |
-| GET    | `/api/jobs/{id}`          | Status/progresso de um job             |
-| POST   | `/api/jobs/{id}/cancel`   | Cancela um job em andamento            |
-| GET    | `/api/download/{id}`      | Baixa o resultado de um job concluído  |
+| Método | Rota                      | Auth | Descrição                              |
+|--------|---------------------------|------|----------------------------------------|
+| GET    | `/api/health`             | não  | Status e disponibilidade do FFmpeg     |
+| POST   | `/api/login`              | não  | Autentica e devolve o token de sessão  |
+| GET    | `/api/me`                 | sim  | Retorna o email do usuário logado      |
+| GET    | `/api/formats`            | sim  | Formatos, codecs e opções suportados   |
+| POST   | `/api/convert`            | sim  | Envia um vídeo e inicia a conversão    |
+| GET    | `/api/jobs/{id}`          | sim  | Status/progresso de um job             |
+| POST   | `/api/jobs/{id}/cancel`   | sim  | Cancela um job em andamento            |
+| GET    | `/api/download/{id}`      | sim* | Baixa o resultado (token na query)     |
+
+\* O download aceita o token via `?token=` na URL, pois é aberto por link direto.
 
 Documentação interativa (Swagger) disponível em `/docs` no backend.
 
