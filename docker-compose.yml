@@ -1,0 +1,21 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      - WORK_DIR=/data
+      - FILE_TTL=3600        # arquivos temporários expiram após 1h
+      - MAX_UPLOAD_MB=0      # 0 = sem limite de upload
+    volumes:
+      - video_data:/data
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"           # acesse em http://localhost:8080
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  video_data:

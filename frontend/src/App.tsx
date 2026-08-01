@@ -1,128 +1,241 @@
-import { useState, useEffect, useCallback } from 'react'
-import { TrendingUp, RefreshCw, AlertCircle } from 'lucide-react'
-import { buscarAcao } from './api/stocks'
-import type { AcaoDetalhe, Periodo } from './types/stock'
-import { MarketOverview } from './components/MarketOverview'
-import { StockChart } from './components/StockChart'
-import { StockHeader } from './components/StockHeader'
-import { IndicatorPanel } from './components/IndicatorPanel'
-import { SearchBar } from './components/SearchBar'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Trash2, Zap } from 'lucide-react'
+import Header from './components/Header'
+import Dropzone from './components/Dropzone'
+import SettingsPanel from './components/SettingsPanel'
+import FileCard from './components/FileCard'
+import {
+  getFormats,
+  getHealth,
+  getJob,
+  submitConversion,
+} from './api/convert'
+import type {
+  ConvertSettings,
+  FormatsResponse,
+  QueueItem,
+} from './types/convert'
 
-const ACAO_PADRAO = 'PETR4.SA'
+const DEFAULT_SETTINGS: ConvertSettings = {
+  output_format: 'mp4',
+  codec: '',
+  audio_codec: '',
+  mode: 'quality',
+  level: 'balanced',
+  target_size_mb: 10,
+  target_percent: 50,
+  video_bitrate_kbps: 2000,
+  audio_bitrate_kbps: 128,
+  resolution: 'original',
+  fps: 0,
+  speed: 'medium',
+  remove_audio: false,
+  two_pass: false,
+}
+
+let idCounter = 0
+const nextId = () => `f${Date.now()}_${idCounter++}`
 
 export default function App() {
-  const [selectedSymbol, setSelectedSymbol] = useState<string>(ACAO_PADRAO)
-  const [periodo, setPeriodo] = useState<Periodo>('3mo')
-  const [acao, setAcao] = useState<AcaoDetalhe | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [erro, setErro] = useState<string | null>(null)
+  const [formats, setFormats] = useState<FormatsResponse | null>(null)
+  const [ffmpegAvailable, setFfmpegAvailable] = useState<boolean | null>(null)
+  const [ffmpegVersion, setFfmpegVersion] = useState<string | null>(null)
+  const [settings, setSettings] = useState<ConvertSettings>(DEFAULT_SETTINGS)
+  const [queue, setQueue] = useState<QueueItem[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
 
-  const carregarAcao = useCallback(async (symbol: string, p: Periodo) => {
-    setLoading(true)
-    setErro(null)
-    try {
-      const data = await buscarAcao(symbol, p)
-      setAcao(data)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Erro ao carregar dados da ação.'
-      setErro(msg)
-      setAcao(null)
-    } finally {
-      setLoading(false)
-    }
+  const pollers = useRef<Record<string, ReturnType<typeof setInterval>>>({})
+
+  // Carrega formatos e status do FFmpeg
+  useEffect(() => {
+    getFormats()
+      .then(setFormats)
+      .catch(() =>
+        setLoadError('Não foi possível carregar as configurações do servidor.'),
+      )
+    getHealth()
+      .then((h) => {
+        setFfmpegAvailable(h.ffmpeg_available)
+        setFfmpegVersion(h.ffmpeg_version)
+      })
+      .catch(() => setFfmpegAvailable(null))
   }, [])
 
   useEffect(() => {
-    carregarAcao(selectedSymbol, periodo)
-  }, [selectedSymbol, periodo, carregarAcao])
+    const active = pollers.current
+    return () => {
+      Object.values(active).forEach(clearInterval)
+    }
+  }, [])
 
-  const handleSelectAcao = (symbol: string) => {
-    setSelectedSymbol(symbol)
-  }
+  const patchItem = useCallback((localId: string, patch: Partial<QueueItem>) => {
+    setQueue((prev) =>
+      prev.map((it) => (it.localId === localId ? { ...it, ...patch } : it)),
+    )
+  }, [])
+
+  const startPolling = useCallback(
+    (localId: string, jobId: string) => {
+      const interval = setInterval(async () => {
+        try {
+          const job = await getJob(jobId)
+          patchItem(localId, {
+            status: job.status,
+            progress: job.progress,
+            error: job.error,
+            result: job,
+          })
+          if (['done', 'error', 'canceled'].includes(job.status)) {
+            clearInterval(interval)
+            delete pollers.current[localId]
+          }
+        } catch {
+          clearInterval(interval)
+          delete pollers.current[localId]
+          patchItem(localId, { status: 'error', error: 'Falha ao consultar o status.' })
+        }
+      }, 1000)
+      pollers.current[localId] = interval
+    },
+    [patchItem],
+  )
+
+  const handleFiles = useCallback((files: File[]) => {
+    const items: QueueItem[] = files.map((file) => ({
+      localId: nextId(),
+      file,
+      jobId: null,
+      status: 'queued',
+      progress: 0,
+      error: null,
+      result: null,
+    }))
+    setQueue((prev) => [...items, ...prev])
+  }, [])
+
+  const handleConvertAll = useCallback(async () => {
+    const pending = queue.filter((it) => it.status === 'queued' && !it.jobId)
+    for (const item of pending) {
+      patchItem(item.localId, { status: 'uploading', progress: 0 })
+      try {
+        const job = await submitConversion(item.file, settings, (percent) => {
+          patchItem(item.localId, { progress: percent })
+        })
+        patchItem(item.localId, {
+          jobId: job.id,
+          status: job.status,
+          progress: job.progress,
+          result: job,
+        })
+        startPolling(item.localId, job.id)
+      } catch (e: any) {
+        const detail =
+          e?.response?.data?.detail || e?.message || 'Falha no envio do arquivo.'
+        patchItem(item.localId, { status: 'error', error: detail })
+      }
+    }
+  }, [queue, settings, patchItem, startPolling])
+
+  const removeItem = useCallback((localId: string) => {
+    if (pollers.current[localId]) {
+      clearInterval(pollers.current[localId])
+      delete pollers.current[localId]
+    }
+    setQueue((prev) => prev.filter((it) => it.localId !== localId))
+  }, [])
+
+  const clearFinished = useCallback(() => {
+    setQueue((prev) =>
+      prev.filter((it) => !['done', 'error', 'canceled'].includes(it.status)),
+    )
+  }, [])
+
+  const pendingCount = queue.filter(
+    (it) => it.status === 'queued' && !it.jobId,
+  ).length
+  const hasFinished = queue.some((it) =>
+    ['done', 'error', 'canceled'].includes(it.status),
+  )
 
   return (
-    <div className="min-h-screen bg-gray-950 flex flex-col">
-      {/* Header */}
-      <header className="bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center justify-between gap-4 sticky top-0 z-10">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center">
-            <TrendingUp size={18} className="text-white" />
+    <div className="min-h-screen">
+      <div className="mx-auto max-w-6xl px-4 py-8 md:py-12">
+        <Header ffmpegAvailable={ffmpegAvailable} ffmpegVersion={ffmpegVersion} />
+
+        {loadError && (
+          <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-300">
+            {loadError}
           </div>
-          <div>
-            <span className="font-bold text-white text-lg">AçõesBR</span>
-            <span className="text-xs text-gray-500 ml-2 hidden sm:inline">Rastreador de Ações Brasileiras</span>
+        )}
+
+        {ffmpegAvailable === false && (
+          <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-300">
+            O FFmpeg não está instalado no servidor. Instale-o (ex.:{' '}
+            <code className="rounded bg-slate-800 px-1.5 py-0.5">apt install ffmpeg</code>)
+            para habilitar as conversões.
+          </div>
+        )}
+
+        <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+          {/* Coluna principal: upload + fila */}
+          <div className="space-y-6">
+            <Dropzone
+              onFiles={handleFiles}
+              acceptExtensions={formats?.input_extensions ?? []}
+            />
+
+            {queue.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <button
+                  onClick={handleConvertAll}
+                  disabled={pendingCount === 0 || ffmpegAvailable === false}
+                  className="btn-primary inline-flex items-center gap-2"
+                >
+                  <Zap className="h-4 w-4" />
+                  Converter {pendingCount > 0 ? `(${pendingCount})` : 'tudo'}
+                </button>
+                {hasFinished && (
+                  <button
+                    onClick={clearFinished}
+                    className="btn-ghost inline-flex items-center gap-2 text-sm"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Limpar concluídos
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              {queue.map((item) => (
+                <FileCard key={item.localId} item={item} onRemove={removeItem} />
+              ))}
+            </div>
+
+            {queue.length === 0 && (
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/30 px-4 py-8 text-center text-sm text-slate-500">
+                Nenhum arquivo na fila. Adicione vídeos para começar.
+              </div>
+            )}
+          </div>
+
+          {/* Coluna lateral: configurações */}
+          <div className="lg:sticky lg:top-8 lg:self-start">
+            {formats ? (
+              <SettingsPanel
+                formats={formats}
+                settings={settings}
+                onChange={(patch) => setSettings((s) => ({ ...s, ...patch }))}
+              />
+            ) : (
+              <div className="card text-sm text-slate-500">Carregando opções…</div>
+            )}
           </div>
         </div>
 
-        <SearchBar onSelect={handleSelectAcao} />
-      </header>
-
-      {/* Main layout */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <aside className="w-64 min-w-[240px] border-r border-gray-800 p-3 hidden md:flex flex-col overflow-hidden">
-          <MarketOverview onSelectAcao={handleSelectAcao} selectedSymbol={selectedSymbol} />
-        </aside>
-
-        {/* Content */}
-        <main className="flex-1 overflow-y-auto p-4 space-y-4">
-          {loading && (
-            <div className="flex items-center justify-center h-64">
-              <div className="flex flex-col items-center gap-3 text-gray-400">
-                <RefreshCw size={32} className="animate-spin text-green-500" />
-                <p>Carregando dados da ação...</p>
-              </div>
-            </div>
-          )}
-
-          {erro && !loading && (
-            <div className="flex items-center justify-center h-64">
-              <div className="card max-w-md text-center">
-                <AlertCircle size={40} className="text-red-400 mx-auto mb-3" />
-                <p className="text-red-400 font-semibold mb-1">Erro ao carregar dados</p>
-                <p className="text-gray-500 text-sm mb-4">{erro}</p>
-                <button
-                  onClick={() => carregarAcao(selectedSymbol, periodo)}
-                  className="btn-primary"
-                >
-                  Tentar Novamente
-                </button>
-              </div>
-            </div>
-          )}
-
-          {acao && !loading && !erro && (
-            <>
-              <StockHeader
-                acao={acao}
-                periodo={periodo}
-                onPeriodoChange={setPeriodo}
-              />
-
-              <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                {/* Chart — 2/3 */}
-                <div className="xl:col-span-2 card" style={{ minHeight: 420 }}>
-                  <h2 className="font-semibold text-white mb-3">
-                    Histórico de Preços — {acao.symbol.replace('.SA', '')}
-                  </h2>
-                  <div style={{ height: 380 }}>
-                    <StockChart historico={acao.historico} analise={acao.analise.detalhes} />
-                  </div>
-                </div>
-
-                {/* Indicators — 1/3 */}
-                <div className="xl:col-span-1" style={{ minHeight: 420 }}>
-                  <IndicatorPanel analise={acao.analise} />
-                </div>
-              </div>
-
-              {/* Mobile market overview */}
-              <div className="md:hidden">
-                <MarketOverview onSelectAcao={handleSelectAcao} selectedSymbol={selectedSymbol} />
-              </div>
-            </>
-          )}
-        </main>
+        <footer className="mt-12 text-center text-xs text-slate-600">
+          Processamento local com FFmpeg · Sem limites de conversão
+        </footer>
       </div>
     </div>
   )

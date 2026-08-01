@@ -1,5 +1,5 @@
 {
-  "name": "acoes-br-tracker",
+  "name": "video-compressor-converter",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -11,7 +11,6 @@
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "recharts": "^2.13.3",
     "axios": "^1.7.7",
     "lucide-react": "^0.454.0",
     "clsx": "^2.1.1"
