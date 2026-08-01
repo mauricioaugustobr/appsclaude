@@ -1,0 +1,51 @@
+========================================================
+ COMPRESSOR E CONVERSOR DE VIDEOS - Como testar no Windows
+========================================================
+
+Voce so precisa fazer o PASSO 1 uma unica vez.
+
+--------------------------------------------------------
+PASSO 1 - Instalar o Docker Desktop (so na primeira vez)
+--------------------------------------------------------
+1. Acesse: https://www.docker.com/products/docker-desktop/
+2. Clique em "Download for Windows" e instale (opcoes padrao).
+3. Reinicie o computador se ele pedir.
+4. Abra o "Docker Desktop" e espere ficar "Engine running"
+   (o icone da baleia fica verde/estavel).
+
+   Obs.: se aparecer aviso sobre "WSL 2", aceite instalar/atualizar
+   e reinicie. E normal na primeira vez.
+
+--------------------------------------------------------
+PASSO 2 - Abrir a ferramenta
+--------------------------------------------------------
+1. Certifique-se de que o Docker Desktop esta aberto.
+2. De DOIS CLIQUES no arquivo:  INICIAR-Windows.bat
+3. Espere. Na primeira vez demora alguns minutos.
+4. O navegador abre sozinho em http://localhost:8080
+   (se nao abrir, digite esse endereco no navegador).
+
+   Login inicial:
+      Email: admin@empresa.com
+      Senha: admin123
+
+--------------------------------------------------------
+PARA FECHAR
+--------------------------------------------------------
+De dois cliques em:  PARAR-Windows.bat
+(ou feche a janela preta que abriu e o Docker Desktop)
+
+--------------------------------------------------------
+TROCAR AS SENHAS (antes de usar na empresa)
+--------------------------------------------------------
+Abra o arquivo "docker-compose.yml" no Bloco de Notas e edite a linha:
+
+   - AUTH_USERS=admin@empresa.com:admin123
+
+Coloque os usuarios da sua equipe assim (separados por virgula):
+
+   - AUTH_USERS=joao@empresa.com:senha123,maria@empresa.com:outrasenha
+
+Salve e rode o INICIAR-Windows.bat de novo.
+
+========================================================
